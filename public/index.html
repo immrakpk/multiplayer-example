@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Simple Multiplayer Agar.io</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #eaeaea;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      background: #fff;
+      display: block;
+      margin: 0 auto;
+      border: 2px solid #000;
+    }
+    #menu, #gameOver {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      background: rgba(255,255,255,0.9);
+      padding: 20px;
+      border: 1px solid #333;
+      border-radius: 5px;
+    }
+    #gameOver {
+      display: none;
+    }
+    input {
+      padding: 10px;
+      margin: 10px;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- Main Menu -->
+  <div id="menu">
+    <h1>Multiplayer Agar.io</h1>
+    <input type="text" id="guestName" placeholder="Enter your name" />
+    <br/>
+    <button id="startGame">Start Game</button>
+  </div>
+
+  <!-- Game Over Screen -->
+  <div id="gameOver">
+    <h1>Game Over</h1>
+    <p id="finalScore"></p>
+    <button id="restart">Restart</button>
+  </div>
+
+  <!-- Canvas for game rendering -->
+  <!-- Adding tabindex so that the canvas can be focused to capture arrow key events -->
+  <canvas id="gameCanvas" width="1000" height="1000" tabindex="0" style="display: none;"></canvas>
+
+  <!-- Load Socket.io client library -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    // Get references to DOM elements
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const menu = document.getElementById('menu');
+    const gameOverDiv = document.getElementById('gameOver');
+    const finalScoreP = document.getElementById('finalScore');
+    const startGameBtn = document.getElementById('startGame');
+    const restartBtn = document.getElementById('restart');
+
+    let playerName = "";
+    let gameState = null;
+    let isGameOver = false;
+
+    // Start Game: hide menu, show canvas, focus it, and send join event to the server
+    startGameBtn.addEventListener('click', () => {
+      playerName = document.getElementById('guestName').value || 'Guest';
+      menu.style.display = 'none';
+      canvas.style.display = 'block';
+      canvas.focus(); // ensure canvas gets focus so arrow keys are captured
+      socket.emit('join', playerName);
+    });
+
+    // Restart game by reloading the page
+    restartBtn.addEventListener('click', () => {
+      location.reload();
+    });
+
+    // Player movement using arrow keys
+    const playerSpeed = 5;
+    document.addEventListener('keydown', event => {
+      // Debug log for keydown events
+      console.log('Key pressed:', event.key);
+      
+      // Only move if the game state exists and the game is not over.
+      if (!gameState || isGameOver) return;
+      
+      // Find the local player's current position from the game state.
+      // (If there are duplicate names, you might consider using socket.id instead.)
+      const localPlayer = gameState.players.find(p => p.name === playerName);
+      if (!localPlayer) {
+        console.warn('Local player not found in gameState.');
+        return;
+      }
+      
+      let newX = localPlayer.x;
+      let newY = localPlayer.y;
+      
+      if (event.key === 'ArrowUp') {
+        newY -= playerSpeed;
+      } else if (event.key === 'ArrowDown') {
+        newY += playerSpeed;
+      } else if (event.key === 'ArrowLeft') {
+        newX -= playerSpeed;
+      } else if (event.key === 'ArrowRight') {
+        newX += playerSpeed;
+      } else {
+        // If not an arrow key, ignore
+        return;
+      }
+      
+      // Send the updated position to the server.
+      console.log('Sending new position:', { x: newX, y: newY });
+      socket.emit('move', { x: newX, y: newY });
+    });
+
+    // Receive the game state from the server and draw it
+    socket.on('gameState', state => {
+      gameState = state;
+      drawGame();
+    });
+
+    // When the server notifies that the player has died
+    socket.on('gameOver', data => {
+      isGameOver = true;
+      canvas.style.display = 'none';
+      gameOverDiv.style.display = 'block';
+      finalScoreP.innerText = 'Your score: ' + data.score;
+    });
+
+    // Main draw function
+    function drawGame() {
+      if (!gameState) return;
+
+      // Clear the canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw the boundary
+      ctx.strokeStyle = 'black';
+      ctx.strokeRect(0, 0, gameState.world.width, gameState.world.height);
+
+      // Draw food particles
+      for (const food of gameState.foods) {
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = food.color;
+        ctx.fill();
+      }
+
+      // Draw all players
+      for (const player of gameState.players) {
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+        // Color the local player differently
+        ctx.fillStyle = (player.name === playerName) ? 'blue' : 'red';
+        ctx.fill();
+
+        // Draw player name above the cell
+        ctx.fillStyle = 'black';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(player.name, player.x, player.y);
+      }
+
+      // Draw UI info (score and number of players)
+      const localPlayer = gameState.players.find(p => p.name === playerName);
+      const score = localPlayer ? localPlayer.size : 0;
+      ctx.fillStyle = 'black';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('Score: ' + score, 10, 20);
+      ctx.fillText('Players: ' + gameState.players.length, 10, 40);
+    }
+  </script>
+</body>
+</html>
